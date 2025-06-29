@@ -11,10 +11,12 @@ class BookTrackingSystem:
         try:
             self.connection = pyodbc.connect(
                 'DRIVER={SQL Server};'
-                'SERVER=localhost;'
+                'SERVER=localhost,1433;'  # Default SQL Server port is 1433 # 'SERVER=localhost\SQLEXPRESS,1433;' #'SERVER=your_server_name\instance_name,port_number;'
                 'DATABASE=BookTrackingSystem;'
-                'UID=sa;'
-                'PWD=p0w2i8'
+                'Trusted_Connection=yes;'  # Use Windows Authentication
+                # If you need SQL Server authentication instead, use:
+                # 'UID=your_username;'
+                # 'PWD=your_password;'
             )
             print("Connected to database successfully!")
             return True
