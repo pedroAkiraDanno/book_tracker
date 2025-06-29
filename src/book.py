@@ -32,7 +32,7 @@ class BookTrackingSystem:
         try:
             cursor = self.connection.cursor()
             cursor.execute("EXEC sp_RegisterUser ?, ?, ?, ?", 
-                          (username, password, email, full_name))
+                         (username, password, email, full_name))
             self.connection.commit()
             print("Registration successful!")
         except pyodbc.Error as e:
@@ -64,52 +64,119 @@ class BookTrackingSystem:
             print(f"Login error: {e}")
             return False
     
-    def add_book(self):
-        if not self.current_user:
-            print("Please login first.")
+    def add_book_to_system(self):
+        """Add a new book to the global books table"""
+        print("\n--- Add New Book to System ---")
+        title = input("Title: ").strip()
+        author = input("Author: ").strip()
+        
+        if not title or not author:
+            print("Title and author are required!")
             return
             
-        print("\n--- Add New Book ---")
-        title = input("Title: ")
-        author = input("Author: ")
-        isbn = input("ISBN (optional): ")
-        year = input("Publication year (optional): ")
-        genre = input("Genre (optional): ")
-        description = input("Description (optional): ")
-        pages = input("Page count (optional): ")
+        isbn = input("ISBN (optional): ").strip() or None
+        year = input("Publication year (optional): ").strip() or None
+        genre = input("Genre (optional): ").strip() or None
+        description = input("Description (optional): ").strip() or None
+        pages = input("Page count (optional): ").strip() or None
         
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
                 INSERT INTO Books (Title, Author, ISBN, PublicationYear, Genre, Description, PageCount)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                SELECT SCOPE_IDENTITY() AS BookID;
-            """, (title, author, isbn, year if year else None, genre, description, pages if pages else None))
-            
-            book_id = cursor.fetchone()[0]
-            
-            # Add to user's collection with default status
-            cursor.execute("""
-                INSERT INTO UserBooks (UserID, BookID, StatusID)
-                VALUES (?, ?, (SELECT StatusID FROM BookStatus WHERE StatusName = 'I want to read'))
-            """, (self.current_user['UserID'], book_id))
+            """, (title, author, isbn, year, genre, description, pages))
             
             self.connection.commit()
-            print("Book added successfully!")
+            print("Book added to system successfully!")
         except pyodbc.Error as e:
             print(f"Error adding book: {e}")
     
-    def list_books(self):
+    def add_book_to_my_collection(self):
+        """Add an existing book to the user's personal collection"""
         if not self.current_user:
             print("Please login first.")
             return
             
-        print("\n--- Your Book Collection ---")
+        print("\n--- Add Book to My Collection ---")
+        search_term = input("Search for book by title or author: ").strip()
+        
+        if not search_term:
+            print("Please enter a search term.")
+            return
+            
+        try:
+            cursor = self.connection.cursor()
+            
+            # Search for books not already in user's collection
+            cursor.execute("""
+                SELECT b.BookID, b.Title, b.Author 
+                FROM Books b
+                WHERE (b.Title LIKE ? OR b.Author LIKE ?)
+                AND NOT EXISTS (
+                    SELECT 1 FROM UserBooks ub 
+                    WHERE ub.BookID = b.BookID 
+                    AND ub.UserID = ?
+                )
+            """, (f'%{search_term}%', f'%{search_term}%', self.current_user['UserID']))
+            
+            books = cursor.fetchall()
+            
+            if not books:
+                print("No matching books found or they're already in your collection.")
+                return
+                
+            print("\nMatching Books:")
+            for i, book in enumerate(books, 1):
+                print(f"{i}. {book[1]} by {book[2]}")
+                
+            choice = input("\nEnter the number of the book to add (or 0 to cancel): ")
+            
+            try:
+                choice = int(choice)
+                if choice == 0:
+                    return
+                elif 1 <= choice <= len(books):
+                    selected_book = books[choice-1]
+                    
+                    # Show status options
+                    cursor.execute("SELECT StatusID, StatusName FROM BookStatus")
+                    statuses = cursor.fetchall()
+                    
+                    print("\nSelect a status:")
+                    for status in statuses:
+                        print(f"{status[0]}. {status[1]}")
+                    
+                    status_id = input("Enter status ID: ")
+                    
+                    # Add to user's collection
+                    cursor.execute("""
+                        INSERT INTO UserBooks (UserID, BookID, StatusID)
+                        VALUES (?, ?, ?)
+                    """, (self.current_user['UserID'], selected_book[0], status_id))
+                    
+                    self.connection.commit()
+                    print(f"Added '{selected_book[1]}' to your collection!")
+                else:
+                    print("Invalid selection.")
+            except ValueError:
+                print("Please enter a valid number.")
+                
+        except pyodbc.Error as e:
+            print(f"Error searching books: {e}")
+    
+    def list_my_books(self):
+        if not self.current_user:
+            print("Please login first.")
+            return
+            
+        print("\n--- My Book Collection ---")
         
         try:
             cursor = self.connection.cursor()
             cursor.execute("""
-                SELECT b.BookID, b.Title, b.Author, bs.StatusName, ub.Rating, ub.StartDate, ub.EndDate
+                SELECT b.BookID, b.Title, b.Author, bs.StatusName, 
+                       ub.Rating, ub.StartDate, ub.EndDate, ub.Review
                 FROM UserBooks ub
                 JOIN Books b ON ub.BookID = b.BookID
                 JOIN BookStatus bs ON ub.StatusID = bs.StatusID
@@ -120,7 +187,7 @@ class BookTrackingSystem:
             books = cursor.fetchall()
             
             if not books:
-                print("You don't have any books in your collection yet.")
+                print("Your collection is empty. Add some books!")
                 return
                 
             for book in books:
@@ -134,16 +201,55 @@ class BookTrackingSystem:
                     print(f"Started: {book[5].strftime('%Y-%m-%d')}")
                 if book[6]:
                     print(f"Finished: {book[6].strftime('%Y-%m-%d')}")
+                if book[7]:
+                    print(f"Review: {book[7]}")
                 
         except pyodbc.Error as e:
             print(f"Error retrieving books: {e}")
+    
+    def search_books_in_system(self):
+        """Search books in the global system"""
+        print("\n--- Search Books ---")
+        search_term = input("Enter title or author to search: ").strip()
+        
+        if not search_term:
+            print("Please enter a search term.")
+            return
+            
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT b.BookID, b.Title, b.Author, b.PublicationYear, b.Genre
+                FROM Books b
+                WHERE b.Title LIKE ? OR b.Author LIKE ?
+                ORDER BY b.Title
+            """, (f'%{search_term}%', f'%{search_term}%'))
+            
+            books = cursor.fetchall()
+            
+            if not books:
+                print("No books found matching your search.")
+                return
+                
+            print("\nSearch Results:")
+            for book in books:
+                print(f"\nID: {book[0]}")
+                print(f"Title: {book[1]}")
+                print(f"Author: {book[2]}")
+                if book[3]:
+                    print(f"Year: {book[3]}")
+                if book[4]:
+                    print(f"Genre: {book[4]}")
+                
+        except pyodbc.Error as e:
+            print(f"Error searching books: {e}")
     
     def update_book_status(self):
         if not self.current_user:
             print("Please login first.")
             return
             
-        self.list_books()
+        self.list_my_books()
         book_id = input("\nEnter the ID of the book to update: ")
         
         try:
@@ -243,11 +349,13 @@ class BookTrackingSystem:
             if self.current_user:
                 print(f"Logged in as: {self.current_user['Username']}")
                 print("1. List my books")
-                print("2. Add a new book")
-                print("3. Update book status")
-                print("4. View reading history")
-                print("5. Logout")
-                print("6. Exit")
+                print("2. Add book to system")
+                print("3. Add book to my collection")
+                print("4. Search books in system")
+                print("5. Update book status")
+                print("6. View reading history")
+                print("7. Logout")
+                print("8. Exit")
             else:
                 print("1. Login")
                 print("2. Register")
@@ -257,17 +365,21 @@ class BookTrackingSystem:
             
             if self.current_user:
                 if choice == '1':
-                    self.list_books()
+                    self.list_my_books()
                 elif choice == '2':
-                    self.add_book()
+                    self.add_book_to_system()
                 elif choice == '3':
-                    self.update_book_status()
+                    self.add_book_to_my_collection()
                 elif choice == '4':
-                    self.view_history()
+                    self.search_books_in_system()
                 elif choice == '5':
+                    self.update_book_status()
+                elif choice == '6':
+                    self.view_history()
+                elif choice == '7':
                     self.current_user = None
                     print("Logged out successfully.")
-                elif choice == '6':
+                elif choice == '8':
                     print("Goodbye!")
                     break
                 else:
