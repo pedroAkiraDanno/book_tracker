@@ -190,22 +190,105 @@ class BookTrackingSystem:
                 print("Your collection is empty. Add some books!")
                 return
                 
+            print(f"\n{'ID':<5} {'Title':<30} {'Author':<25} {'Status':<15} {'Rating':<6} {'Dates':<20}")
+            print("-" * 100)
             for book in books:
-                print(f"\nID: {book[0]}")
-                print(f"Title: {book[1]}")
-                print(f"Author: {book[2]}")
-                print(f"Status: {book[3]}")
-                if book[4]:
-                    print(f"Rating: {'★' * book[4]}{'☆' * (5 - book[4])}")
+                dates = ""
                 if book[5]:
-                    print(f"Started: {book[5].strftime('%Y-%m-%d')}")
+                    dates += f"Start: {book[5].strftime('%Y-%m-%d')}"
                 if book[6]:
-                    print(f"Finished: {book[6].strftime('%Y-%m-%d')}")
-                if book[7]:
-                    print(f"Review: {book[7]}")
+                    if dates: dates += " "
+                    dates += f"End: {book[6].strftime('%Y-%m-%d')}"
+                
+                print(f"{book[0]:<5} {book[1][:28]:<30} {book[2][:23]:<25} "
+                      f"{book[3][:14]:<15} "
+                      f"{'★'*book[4]+'☆'*(5-book[4]) if book[4] else 'N/A':<6} "
+                      f"{dates:<20}")
                 
         except pyodbc.Error as e:
             print(f"Error retrieving books: {e}")
+    
+    def list_all_books(self):
+        """List all books in the system"""
+        print("\n--- All Books in System ---")
+        
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT BookID, Title, Author, PublicationYear, Genre, Description 
+                FROM Books
+                ORDER BY Title
+            """)
+            
+            books = cursor.fetchall()
+            
+            if not books:
+                print("No books found in the system.")
+                return
+                
+            print(f"\n{'ID':<5} {'Title':<30} {'Author':<25} {'Year':<6} {'Genre':<15}")
+            print("-" * 85)
+            for book in books:
+                print(f"{book[0]:<5} {book[1][:28]:<30} {book[2][:23]:<25} "
+                      f"{str(book[3]) if book[3] else 'N/A':<6} "
+                      f"{book[4][:13] if book[4] else 'N/A':<15}")
+            
+            # Show details if user wants
+            book_id = input("\nEnter book ID to see details (or 0 to continue): ")
+            if book_id != '0':
+                self.show_book_details(book_id)
+                
+        except pyodbc.Error as e:
+            print(f"Error retrieving books: {e}")
+    
+    def show_book_details(self, book_id):
+        """Show detailed information about a specific book"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT BookID, Title, Author, ISBN, PublicationYear, Genre, 
+                       Description, PageCount, AddedDate
+                FROM Books
+                WHERE BookID = ?
+            """, book_id)
+            
+            book = cursor.fetchone()
+            
+            if not book:
+                print("Book not found.")
+                return
+                
+            print("\n--- Book Details ---")
+            print(f"ID: {book[0]}")
+            print(f"Title: {book[1]}")
+            print(f"Author: {book[2]}")
+            print(f"ISBN: {book[3] if book[3] else 'N/A'}")
+            print(f"Publication Year: {book[4] if book[4] else 'N/A'}")
+            print(f"Genre: {book[5] if book[5] else 'N/A'}")
+            print(f"Description: {book[6] if book[6] else 'N/A'}")
+            print(f"Page Count: {book[7] if book[7] else 'N/A'}")
+            print(f"Added to System: {book[8].strftime('%Y-%m-%d')}")
+            
+            if self.current_user:
+                # Check if book is in user's collection
+                cursor.execute("""
+                    SELECT StatusName 
+                    FROM UserBooks ub
+                    JOIN BookStatus bs ON ub.StatusID = bs.StatusID
+                    WHERE ub.UserID = ? AND ub.BookID = ?
+                """, (self.current_user['UserID'], book_id))
+                
+                status = cursor.fetchone()
+                if status:
+                    print(f"\nYour Status: {status[0]}")
+                else:
+                    print("\nThis book is not in your collection yet.")
+                    add = input("Would you like to add it to your collection? (y/n): ")
+                    if add.lower() == 'y':
+                        self.add_book_to_my_collection(book_id)
+                        
+        except pyodbc.Error as e:
+            print(f"Error retrieving book details: {e}")
     
     def search_books_in_system(self):
         """Search books in the global system"""
@@ -232,14 +315,17 @@ class BookTrackingSystem:
                 return
                 
             print("\nSearch Results:")
+            print(f"\n{'ID':<5} {'Title':<30} {'Author':<25} {'Year':<6} {'Genre':<15}")
+            print("-" * 85)
             for book in books:
-                print(f"\nID: {book[0]}")
-                print(f"Title: {book[1]}")
-                print(f"Author: {book[2]}")
-                if book[3]:
-                    print(f"Year: {book[3]}")
-                if book[4]:
-                    print(f"Genre: {book[4]}")
+                print(f"{book[0]:<5} {book[1][:28]:<30} {book[2][:23]:<25} "
+                      f"{str(book[3]) if book[3] else 'N/A':<6} "
+                      f"{book[4][:13] if book[4] else 'N/A':<15}")
+            
+            # Option to view details
+            book_id = input("\nEnter book ID to see details (or 0 to continue): ")
+            if book_id != '0':
+                self.show_book_details(book_id)
                 
         except pyodbc.Error as e:
             print(f"Error searching books: {e}")
@@ -334,11 +420,11 @@ class BookTrackingSystem:
                 print("No history found.")
                 return
                 
+            print(f"\n{'Book':<30} {'From':<15} {'To':<15} {'Date':<20}")
+            print("-" * 80)
             for record in history:
-                print(f"\nBook: {record[0]}")
-                print(f"From: {record[1] if record[1] else 'N/A'}")
-                print(f"To: {record[2]}")
-                print(f"Date: {record[3].strftime('%Y-%m-%d %H:%M')}")
+                print(f"{record[0][:28]:<30} {record[1][:14] if record[1] else 'N/A':<15} "
+                      f"{record[2][:14]:<15} {record[3].strftime('%Y-%m-%d %H:%M'):<20}")
                 
         except pyodbc.Error as e:
             print(f"Error retrieving history: {e}")
@@ -349,17 +435,19 @@ class BookTrackingSystem:
             if self.current_user:
                 print(f"Logged in as: {self.current_user['Username']}")
                 print("1. List my books")
-                print("2. Add book to system")
-                print("3. Add book to my collection")
-                print("4. Search books in system")
-                print("5. Update book status")
-                print("6. View reading history")
-                print("7. Logout")
-                print("8. Exit")
+                print("2. List all books in system")
+                print("3. Add book to system")
+                print("4. Add book to my collection")
+                print("5. Search books in system")
+                print("6. Update book status")
+                print("7. View reading history")
+                print("8. Logout")
+                print("9. Exit")
             else:
                 print("1. Login")
                 print("2. Register")
-                print("3. Exit")
+                print("3. List all books in system")
+                print("4. Exit")
             
             choice = input("Enter your choice: ")
             
@@ -367,19 +455,21 @@ class BookTrackingSystem:
                 if choice == '1':
                     self.list_my_books()
                 elif choice == '2':
-                    self.add_book_to_system()
+                    self.list_all_books()
                 elif choice == '3':
-                    self.add_book_to_my_collection()
+                    self.add_book_to_system()
                 elif choice == '4':
-                    self.search_books_in_system()
+                    self.add_book_to_my_collection()
                 elif choice == '5':
-                    self.update_book_status()
+                    self.search_books_in_system()
                 elif choice == '6':
-                    self.view_history()
+                    self.update_book_status()
                 elif choice == '7':
+                    self.view_history()
+                elif choice == '8':
                     self.current_user = None
                     print("Logged out successfully.")
-                elif choice == '8':
+                elif choice == '9':
                     print("Goodbye!")
                     break
                 else:
@@ -391,6 +481,8 @@ class BookTrackingSystem:
                 elif choice == '2':
                     self.register_user()
                 elif choice == '3':
+                    self.list_all_books()
+                elif choice == '4':
                     print("Goodbye!")
                     break
                 else:
