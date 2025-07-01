@@ -1,3 +1,19 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 -- Create database
 CREATE DATABASE BookTrackingSystem;
 GO
